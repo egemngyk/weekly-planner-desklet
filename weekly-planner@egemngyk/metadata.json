@@ -2,6 +2,7 @@
     "uuid": "weekly-planner@egemngyk",
     "name": "Weekly Planner",
     "description": "A weekly planner: add entries to a day with the plus button, reorder them by dragging, and give them a color, to-do and important flags. Every instance works independently. English and Turkish interface.",
+    "icon": "icon.png",
     "version": "1.3.0",
     "max-instances": "50",
     "website": "https://github.com/egemngyk",
