@@ -716,24 +716,33 @@ PlannerDesklet.prototype = {
 
     /* ---------------- storage ---------------- */
 
+    /* Per-instance data file: entries-<id>.json */
     _dataPath: function () {
-        return GLib.build_filenamev([DATA_DIR, 'entries.json']);
+        return GLib.build_filenamev([DATA_DIR, 'entries-' + this.instanceId + '.json']);
     },
 
-    _legacyDataPath: function () {
-        return GLib.build_filenamev([DATA_DIR, this.instanceId + '.json']);
+    /* Legacy paths used for one-time migration only */
+    _legacyPaths: function () {
+        return [
+            GLib.build_filenamev([DATA_DIR, 'entries.json']),      // old shared file
+            GLib.build_filenamev([DATA_DIR, this.instanceId + '.json']) // even older format
+        ];
     },
 
     _loadData: function () {
         const path = this._dataPath();
-        const legacyPath = this._legacyDataPath();
         const tryRead = function (p) {
             if (!GLib.file_test(p, GLib.FileTest.EXISTS)) return undefined;
             try { return JSON.parse(Cinnamon.get_file_contents_utf8_sync(p)); } catch (e) { return null; }
         };
         let raw = tryRead(path);
-        if (raw === undefined && GLib.file_test(legacyPath, GLib.FileTest.EXISTS)) {
-            raw = tryRead(legacyPath);
+        // One-time migration: if own file missing, try legacy paths
+        if (raw === undefined) {
+            const legacies = this._legacyPaths();
+            for (let li = 0; li < legacies.length; li++) {
+                raw = tryRead(legacies[li]);
+                if (raw !== undefined) break;
+            }
         }
         if (raw === null) { // corrupt file: move it aside, try the backup
             try {
@@ -774,12 +783,6 @@ PlannerDesklet.prototype = {
             const f = Gio.File.new_for_path(this._dataPath());
             // replace_contents: temp file + rename (atomic); make_backup=true -> "<file>~" backup
             f.replace_contents(jsonStr, null, true, Gio.FileCreateFlags.NONE, null);
-
-            // Also keep legacy <instanceId>.json in sync
-            try {
-                const fLegacy = Gio.File.new_for_path(this._legacyDataPath());
-                fLegacy.replace_contents(jsonStr, null, false, Gio.FileCreateFlags.NONE, null);
-            } catch (le) { /* ignore */ }
 
             this._syncSettingsJson(jsonStr);
         } catch (e) {
