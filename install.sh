@@ -13,13 +13,15 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     rm -rf "$DEST"
     echo "Removed: $DEST"
     echo "Remove any instances on your desktop from the 'Desklets' settings screen."
-    echo "Your data is still here (delete it manually if you want): ${XDG_DATA_HOME:-$HOME/.local/share}/weekly-planner-desklet/"
+    echo "Your data and settings are still here (delete them manually if you want): ${XDG_DATA_HOME:-$HOME/.local/share}/weekly-planner-desklet/"
     exit 0
 fi
 
 if [[ "${1:-}" == "--reset-settings" ]]; then
     # Clears settings files left over from old/broken attempts (entry data is untouched).
     rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/cinnamon/spices/$UUID"
+    rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/weekly-planner-desklet/settings"*.json
+    rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/weekly-planner-desklet/config"*.json
     echo "Stale settings cleared. Remove the old desklet instance from your desktop and add it again."
 fi
 
@@ -31,7 +33,7 @@ rm -rf "$DEST"
 cp -r "$SRC" "$DEST"
 echo "Installed: $DEST"
 
-# Ensure data directory and default entries.json exist
+# Ensure data directory, default entries.json and settings.json exist
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/weekly-planner-desklet"
 mkdir -p "$DATA_DIR"
 if [[ ! -s "$DATA_DIR/entries.json" ]]; then
@@ -73,6 +75,48 @@ if [[ ! -s "$DATA_DIR/entries.json" ]]; then
 }
 EOF
     echo "Created template: $DATA_DIR/entries.json"
+fi
+
+if [[ ! -s "$DATA_DIR/settings.json" ]]; then
+    cat > "$DATA_DIR/settings.json" << 'EOF'
+{
+  "language": "en",
+  "layoutMode": "columns",
+  "compact": false,
+  "highlightToday": true,
+  "doneStyle": "both",
+  "width": 840,
+  "height": 480,
+  "fontSize": 12,
+  "uiScale": 100,
+  "bgColor": "rgb(28,30,36)",
+  "textColor": "rgb(236,238,242)",
+  "accentColor": "rgb(79,157,222)",
+  "dayHeaderColor": "rgb(255,255,255)",
+  "borderColor": "rgb(60,65,75)",
+  "importantColor": "rgb(255,196,60)",
+  "opacity": 90,
+  "borderWidth": 1,
+  "borderRadius": 10,
+  "dateFormat": "full",
+  "headerStyle": "title",
+  "showNotes": true,
+  "showCheckbox": true,
+  "showStar": true,
+  "showDay0": true,
+  "showDay1": true,
+  "showDay2": true,
+  "showDay3": true,
+  "showDay4": true,
+  "showDay5": true,
+  "showDay6": true,
+  "entryCols": 1,
+  "entryRows": 1,
+  "maxEntriesPerDay": 0,
+  "deskletTitle": ""
+}
+EOF
+    echo "Created template: $DATA_DIR/settings.json"
 fi
 
 # Reload desklet in Cinnamon if Cinnamon is running

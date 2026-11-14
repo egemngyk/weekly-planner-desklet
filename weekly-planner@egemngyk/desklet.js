@@ -679,6 +679,7 @@ PlannerDesklet.prototype = {
         this._lastAppliedJson = '';
         this._fileMonitor = null;
         this._renderIdle = null;
+        this._saveSettingsTimer = null;
         try {
             this._setup(metadata, desklet_id);
         } catch (e) {
@@ -702,6 +703,7 @@ PlannerDesklet.prototype = {
             }.bind(this));
         }, this);
 
+        this._loadSettings();
         this._loadData();
         if (!this.data.ui.editWeek) this.data.ui.editWeek = iso(mondayOf(today()));
         this._buildUi();
@@ -714,7 +716,102 @@ PlannerDesklet.prototype = {
         this._dayTimer = Mainloop.timeout_add_seconds(60, this._checkDay.bind(this));
     },
 
-    /* ---------------- storage ---------------- */
+    /* ---------------- storage: settings ---------------- */
+
+    /* Per-instance settings file: settings-<id>.json */
+    _settingsPath: function () {
+        return GLib.build_filenamev([DATA_DIR, 'settings-' + this.instanceId + '.json']);
+    },
+
+    _findFallbackSettingsPath: function () {
+        const primaryFallback = GLib.build_filenamev([DATA_DIR, 'settings.json']);
+        if (GLib.file_test(primaryFallback, GLib.FileTest.EXISTS)) return primaryFallback;
+
+        // Check if any other settings-<otherId>.json exists in DATA_DIR
+        try {
+            const dir = Gio.File.new_for_path(DATA_DIR);
+            const enumerator = dir.enumerate_children('standard::name,time::modified', Gio.FileQueryInfoFlags.NONE, null);
+            let info;
+            let latestFile = null;
+            let latestTime = 0;
+            while ((info = enumerator.next_file(null))) {
+                const name = info.get_name();
+                if ((name.startsWith('settings-') || name.startsWith('config-')) && name.endsWith('.json') && !name.endsWith('~')) {
+                    const mtime = info.get_modification_date_time();
+                    const t = mtime ? mtime.to_unix() : 0;
+                    if (t >= latestTime) {
+                        latestTime = t;
+                        latestFile = GLib.build_filenamev([DATA_DIR, name]);
+                    }
+                }
+            }
+            if (latestFile) return latestFile;
+        } catch (e) { /* ignore */ }
+
+        return null;
+    },
+
+    _loadSettings: function () {
+        const tryRead = function (p) {
+            if (!p || !GLib.file_test(p, GLib.FileTest.EXISTS)) return undefined;
+            try { return JSON.parse(Cinnamon.get_file_contents_utf8_sync(p)); } catch (e) { return null; }
+        };
+
+        const ownPath = this._settingsPath();
+        let raw = tryRead(ownPath);
+        if (raw === undefined) {
+            const fallbackPath = this._findFallbackSettingsPath();
+            if (fallbackPath) raw = tryRead(fallbackPath);
+        }
+
+        if (raw && typeof raw === 'object') {
+            CFG_KEYS.forEach(function (k) {
+                if (raw[k] !== undefined) {
+                    try {
+                        this.settings.setValue(k, raw[k]);
+                    } catch (e) { /* ignore */ }
+                    this['cfg_' + k] = raw[k];
+                }
+            }, this);
+        }
+
+        this._saveSettingsNow();
+    },
+
+    _scheduleSaveSettings: function () {
+        if (this._saveSettingsTimer) return;
+        this._saveSettingsTimer = Mainloop.timeout_add(400, function () {
+            this._saveSettingsTimer = null;
+            this._saveSettingsNow();
+            return false;
+        }.bind(this));
+    },
+
+    _saveSettingsNow: function () {
+        try {
+            GLib.mkdir_with_parents(DATA_DIR, 493); // 0755
+            const cfg = {};
+            CFG_KEYS.forEach(function (k) {
+                if (this['cfg_' + k] !== undefined) {
+                    cfg[k] = this['cfg_' + k];
+                }
+            }, this);
+            const jsonStr = JSON.stringify(cfg, null, 2);
+
+            const f = Gio.File.new_for_path(this._settingsPath());
+            f.replace_contents(jsonStr, null, true, Gio.FileCreateFlags.NONE, null);
+
+            // Also keep shared settings.json updated as fallback
+            try {
+                const fShared = Gio.File.new_for_path(GLib.build_filenamev([DATA_DIR, 'settings.json']));
+                fShared.replace_contents(jsonStr, null, false, Gio.FileCreateFlags.NONE, null);
+            } catch (se) { /* ignore */ }
+        } catch (e) {
+            global.logError('[weekly-planner] save settings error: ' + e);
+        }
+    },
+
+    /* ---------------- storage: entries ---------------- */
 
     /* Per-instance data file: entries-<id>.json */
     _dataPath: function () {
@@ -727,6 +824,33 @@ PlannerDesklet.prototype = {
             GLib.build_filenamev([DATA_DIR, 'entries.json']),      // old shared file
             GLib.build_filenamev([DATA_DIR, this.instanceId + '.json']) // even older format
         ];
+    },
+
+    _findFallbackEntriesPath: function () {
+        const primaryFallback = GLib.build_filenamev([DATA_DIR, 'entries.json']);
+        if (GLib.file_test(primaryFallback, GLib.FileTest.EXISTS)) return primaryFallback;
+
+        try {
+            const dir = Gio.File.new_for_path(DATA_DIR);
+            const enumerator = dir.enumerate_children('standard::name,time::modified', Gio.FileQueryInfoFlags.NONE, null);
+            let info;
+            let latestFile = null;
+            let latestTime = 0;
+            while ((info = enumerator.next_file(null))) {
+                const name = info.get_name();
+                if ((name.startsWith('entries-') || (name.endsWith('.json') && !name.startsWith('settings') && !name.startsWith('config'))) && name.endsWith('.json') && !name.endsWith('~')) {
+                    const mtime = info.get_modification_date_time();
+                    const t = mtime ? mtime.to_unix() : 0;
+                    if (t >= latestTime) {
+                        latestTime = t;
+                        latestFile = GLib.build_filenamev([DATA_DIR, name]);
+                    }
+                }
+            }
+            if (latestFile) return latestFile;
+        } catch (e) { /* ignore */ }
+
+        return null;
     },
 
     _loadData: function () {
@@ -742,6 +866,10 @@ PlannerDesklet.prototype = {
             for (let li = 0; li < legacies.length; li++) {
                 raw = tryRead(legacies[li]);
                 if (raw !== undefined) break;
+            }
+            if (raw === undefined) {
+                const fallback = this._findFallbackEntriesPath();
+                if (fallback) raw = tryRead(fallback);
             }
         }
         if (raw === null) { // corrupt file: move it aside, try the backup
@@ -783,6 +911,12 @@ PlannerDesklet.prototype = {
             const f = Gio.File.new_for_path(this._dataPath());
             // replace_contents: temp file + rename (atomic); make_backup=true -> "<file>~" backup
             f.replace_contents(jsonStr, null, true, Gio.FileCreateFlags.NONE, null);
+
+            // Also keep shared entries.json updated so new/restored instances get the latest data
+            try {
+                const fShared = Gio.File.new_for_path(GLib.build_filenamev([DATA_DIR, 'entries.json']));
+                fShared.replace_contents(jsonStr, null, false, Gio.FileCreateFlags.NONE, null);
+            } catch (se) { /* ignore */ }
 
             this._syncSettingsJson(jsonStr);
         } catch (e) {
@@ -1029,6 +1163,7 @@ PlannerDesklet.prototype = {
             this._cfgIdle = null;
             this._applyTheme();
             this._render();
+            this._scheduleSaveSettings();
             return false;
         }.bind(this));
     },
@@ -1077,6 +1212,7 @@ PlannerDesklet.prototype = {
             const v = Math.max(min, Math.min(max, self['cfg_' + key] + delta));
             try { self.settings.setValue(key, v); } catch (e) { /* ignore */ }
             self['cfg_' + key] = v;
+            self._saveSettingsNow();
             self._onCfgChanged();
         };
         this._menuItems = [];
@@ -1235,6 +1371,7 @@ PlannerDesklet.prototype = {
                     this.settings.setValue('width', this.cfg_width);
                     this.settings.setValue('height', this.cfg_height);
                 } catch (e) { global.logError('[weekly-planner] could not save size: ' + e); }
+                this._saveSettingsNow();
             }
             this._onCfgChanged();
         }
@@ -1756,7 +1893,9 @@ PlannerDesklet.prototype = {
         if (this._cfgIdle) { Mainloop.source_remove(this._cfgIdle); this._cfgIdle = null; }
         if (this._renderIdle) { Mainloop.source_remove(this._renderIdle); this._renderIdle = null; }
         if (this._saveTimer) { Mainloop.source_remove(this._saveTimer); this._saveTimer = null; }
-        this._saveNow(); // flush pending changes; the data file is intentionally left in place (so nothing is lost on reload)
+        if (this._saveSettingsTimer) { Mainloop.source_remove(this._saveSettingsTimer); this._saveSettingsTimer = null; }
+        this._saveSettingsNow();
+        this._saveNow(); // flush pending changes; data and settings files are intentionally left in place (so nothing is lost on reload/reinstall)
         try { this.settings.finalize(); } catch (e) { /* ignore */ }
     }
 };

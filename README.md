@@ -35,16 +35,15 @@ buttons, dialogs and the right-click menu. The language is a per-instance settin
 The Configure window itself (setting names) is always shown in English.
 
 ## Data model and isolation
-- Appearance settings: Cinnamon's per-instance settings file (`~/.config/cinnamon/spices/weekly-planner@egemngyk/<id>.json`).
-- Entries: `~/.local/share/weekly-planner-desklet/<desklet_id>.json` (atomic writes, the previous version is kept as a `<id>.json~` backup;
-  a corrupt file is moved aside as `.corrupt-<timestamp>`).
+- Appearance and configuration settings: Persisted in `~/.local/share/weekly-planner-desklet/settings-<id>.json` (and `settings.json` fallback), as well as Cinnamon's spice config (`~/.config/cinnamon/spices/weekly-planner@egemngyk/<id>.json`). Removing the desklet from the desktop or reinstalling the app does not delete your colors, size, language, layout, or other options.
+- Entries: `~/.local/share/weekly-planner-desklet/entries-<id>.json` (and `entries.json` fallback, atomic writes, the previous version is kept as a backup `<id>.json~`; a corrupt file is moved aside as `.corrupt-<timestamp>`).
 - The JSON structure supports both weekly recurring entries and specific date entries in one place:
   - `options`: available color palette and usage help.
   - `_example`: reference task template (never displayed on the desklet).
   - `weekly`: repeating tasks for each day (`monday` .. `sunday`).
   - `dates`: tasks specific to a date (`YYYY-MM-DD`). Adding tasks with the **＋** button adds them here.
   Both weekly recurring tasks and date-specific tasks are combined and displayed together on each day.
-- Removing the desklet does not delete its data file (so nothing is lost when reloading).
+- Removing or uninstalling the desklet does not delete data or settings files (so nothing is lost when reloading or reinstalling).
 
 ## Supported versions / assumptions
 - Target: Cinnamon 5.x and 6.x (Linux Mint 21/22). Uses the `Desklet`, `DeskletSettings`, `ModalDialog` and `St` APIs;
