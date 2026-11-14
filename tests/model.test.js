@@ -159,6 +159,63 @@ assert.strictEqual(longDate(wk('2026-11-02'), 'en'), 'Monday · November 2, 2026
 assert.strictEqual(longDate(wk('2026-11-02'), 'tr'), 'Pazartesi · 2 Kasım 2026');
 assert.strictEqual(iso(addDays(wk('2026-03-23'), 7)), '2026-03-30');               // DST week
 
+/* ---- JSON format, options, _example and weekly + dates co-existence ---- */
+const sampleJson = {
+    options: {
+        colors: ['blue', 'red', 'green'],
+        help: 'test help'
+    },
+    _example: {
+        title: 'Sample Example Task',
+        notes: 'Not to be shown',
+        color: 'blue',
+        important: true,
+        todo: true,
+        done: false
+    },
+    weekly: {
+        monday: [{ title: 'Weekly Monday Meeting', todo: true, color: 'blue' }],
+        pazar: [{ title: 'Weekly Sunday Review', todo: false }]
+    },
+    dates: {
+        '2026-11-02': [{ title: 'Dentist Appointment', important: true, color: '#e5534b' }]
+    }
+};
+
+const norm = Model.normalize(sampleJson);
+assert.strictEqual(norm.options.help, 'test help');
+assert.strictEqual(norm._example.title, 'Sample Example Task');
+
+// Check that _example is NEVER included in week's rendered entries
+const w0 = Model.week(norm, wk('2026-11-02'));
+const mondayTitles = w0.days[0].map(e => e.title);
+assert.ok(!mondayTitles.includes('Sample Example Task'));
+const allTitles = [].concat(...w0.days).map(e => e.title);
+assert.ok(!allTitles.includes('Sample Example Task'));
+
+// Check that on 2026-11-02 (Monday), BOTH weekly and dated entries appear!
+assert.deepStrictEqual(mondayTitles, ['Weekly Monday Meeting', 'Dentist Appointment']);
+
+// Check that on 2026-11-08 (Sunday of same week), Weekly Sunday Review appears (from Turkish 'pazar' key!)
+assert.deepStrictEqual(w0.days[6].map(e => e.title), ['Weekly Sunday Review']);
+
+// Check that on 2026-11-09 (Next Monday), weekly meeting repeats, but Dentist does NOT repeat!
+const w1 = Model.week(norm, wk('2026-11-09'));
+assert.deepStrictEqual(w1.days[0].map(e => e.title), ['Weekly Monday Meeting']);
+
+// Check Model.toJSON exports options, _example, weekly, dates
+const exported = Model.toJSON(norm);
+assert.ok(exported.options && Array.isArray(exported.options.colors));
+assert.strictEqual(exported._example.title, 'Sample Example Task');
+assert.strictEqual(exported.weekly.monday[0].title, 'Weekly Monday Meeting');
+assert.strictEqual(exported.weekly.sunday[0].title, 'Weekly Sunday Review');
+assert.strictEqual(exported.dates['2026-11-02'][0].title, 'Dentist Appointment');
+
+// Adding via + button (Model.add to a date) updates dates in toJSON
+Model.add(norm, '2026-11-04', { title: 'Added via Plus Button', todo: true });
+const exported2 = Model.toJSON(norm);
+assert.strictEqual(exported2.dates['2026-11-04'][0].title, 'Added via Plus Button');
+
 /* ---- settings schema is consistent with the code ---- */
 const schema = JSON.parse(fs.readFileSync(path.join(dir, 'settings-schema.json'), 'utf8'));
 const inLayout = new Set();

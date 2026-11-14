@@ -30,4 +30,54 @@ mkdir -p "$(dirname "$DEST")"
 rm -rf "$DEST"
 cp -r "$SRC" "$DEST"
 echo "Installed: $DEST"
+
+# Ensure data directory and default entries.json exist
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/weekly-planner-desklet"
+mkdir -p "$DATA_DIR"
+if [[ ! -s "$DATA_DIR/entries.json" ]]; then
+    cat > "$DATA_DIR/entries.json" << 'EOF'
+{
+  "options": {
+    "colors": [
+      "blue",
+      "red",
+      "yellow",
+      "purple",
+      "teal",
+      "gray",
+      "pink",
+      "green",
+      "orange",
+      "navy"
+    ],
+    "help": "Weekly entries repeat on that weekday every week. Dates entries (YYYY-MM-DD) appear only on that specific date. Use color name or #hex."
+  },
+  "_example": {
+    "title": "Example task (this sample is never displayed on the desklet)",
+    "notes": "Optional notes or details",
+    "color": "blue",
+    "important": true,
+    "todo": true,
+    "done": false
+  },
+  "weekly": {
+    "monday": [],
+    "tuesday": [],
+    "wednesday": [],
+    "thursday": [],
+    "friday": [],
+    "saturday": [],
+    "sunday": []
+  },
+  "dates": {}
+}
+EOF
+    echo "Created template: $DATA_DIR/entries.json"
+fi
+
+# Reload desklet in Cinnamon if Cinnamon is running
+if command -v gdbus >/dev/null 2>&1; then
+    gdbus call --session --dest org.Cinnamon --object-path /org/Cinnamon --method org.Cinnamon.ReloadXlet "$UUID" "DESKLET" >/dev/null 2>&1 || true
+    echo "Reloaded desklet in Cinnamon."
+fi
 echo

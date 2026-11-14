@@ -21,6 +21,7 @@
             "type": "page",
             "title": "Entries",
             "sections": [
+                "secJsonActions",
                 "secMode",
                 "secWeek",
                 "secContent",
@@ -31,6 +32,15 @@
                 "secDay4",
                 "secDay5",
                 "secDay6"
+            ]
+        },
+        "secJsonActions": {
+            "type": "section",
+            "title": "JSON Actions",
+            "keys": [
+                "btnReloadJson",
+                "btnOpenJson",
+                "btnFormatJson"
             ]
         },
         "secAppearance": {
@@ -343,6 +353,24 @@
             "Day name only": "name",
             "Date only (11/02)": "date"
         }
+    },
+    "btnReloadJson": {
+        "type": "button",
+        "description": "Reload entries from JSON",
+        "callback": "onReloadEntries",
+        "tooltip": "Reload entries from entries.json into the desklet and settings lists."
+    },
+    "btnOpenJson": {
+        "type": "button",
+        "description": "Open entries JSON file in text editor",
+        "callback": "onOpenJsonFile",
+        "tooltip": "Open entries.json in your default system text editor."
+    },
+    "btnFormatJson": {
+        "type": "button",
+        "description": "Format / Beautify JSON",
+        "callback": "onFormatJson",
+        "tooltip": "Format and pretty-print entries.json."
     },
     "weeklyMode": {
         "type": "switch",

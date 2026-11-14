@@ -20,9 +20,9 @@ Add the desklet as many times as you like; each one starts empty and independent
 - **Reorder:** press and drag the **≡** grip of an entry. It moves live while you drag; drop it between other entries.
   Dragging onto another day moves the entry to that day.
 - **Complete:** ☐/☑ toggles a *To-do* entry (the entry is not deleted).
-- **Weeks:** ‹ › and **Today** in the header. Entries belong to a date; nothing repeats automatically.
+- **Weeks:** ‹ › and **Today** in the header. Weekly repeating entries and date-specific entries are shown together.
 - **Settings (Configure):** *General* — language, layout, size, UI scale, colors, frame, title formats.
-  *Entries* — **Visible days** (hide any weekdays completely; their entries are kept) and **Content** (notes preview, checkbox, ★).
+  *Entries* — **JSON editor** with *Reload entries*, *Open in text editor*, and *Format JSON* actions, alongside **Visible days** and **Content** options.
 - **Resizing:** drag the right edge (`⋮`), the bottom edge (`⋯`) or the bottom-right corner (`◢`) with the mouse.
   The right-click menu also has *Width ±60*, *Height ±60* and *Go to this week*.
 - **Responsive columns:** the seven columns shrink with the desklet width; below a minimum column width
@@ -38,10 +38,12 @@ The Configure window itself (setting names) is always shown in English.
 - Appearance settings: Cinnamon's per-instance settings file (`~/.config/cinnamon/spices/weekly-planner@egemngyk/<id>.json`).
 - Entries: `~/.local/share/weekly-planner-desklet/<desklet_id>.json` (atomic writes, the previous version is kept as a `<id>.json~` backup;
   a corrupt file is moved aside as `.corrupt-<timestamp>`).
-- `days` maps a date (`YYYY-MM-DD`) to the ordered list of its entries; each entry has `title`, `notes`, `color`, `important`, `todo`, `done`.
-  Day/time/week calculations use the local time zone.
-- Data files from versions before 1.3 are converted automatically on first load (the original is kept as `<id>.json.pre-v3`).
-  Weekly entries of those files are copied onto the dates from 8 weeks back to a year ahead; due dates are dropped.
+- The JSON structure supports both weekly recurring entries and specific date entries in one place:
+  - `options`: available color palette and usage help.
+  - `_example`: reference task template (never displayed on the desklet).
+  - `weekly`: repeating tasks for each day (`monday` .. `sunday`).
+  - `dates`: tasks specific to a date (`YYYY-MM-DD`). Adding tasks with the **＋** button adds them here.
+  Both weekly recurring tasks and date-specific tasks are combined and displayed together on each day.
 - Removing the desklet does not delete its data file (so nothing is lost when reloading).
 
 ## Supported versions / assumptions

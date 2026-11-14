@@ -65,7 +65,9 @@ const I18N = {
         confirmDel: function (t) { return 'Delete “' + t + '”?'; },
         invalidDate: 'Invalid date — use YYYY-MM-DD',
         editingWeek: 'Editing',
-        maxReached: function (n) { return 'Max ' + n + ' entries per day reached.'; }
+        maxReached: function (n) { return 'Max ' + n + ' entries per day reached.'; },
+        jsonReloaded: 'Entries reloaded successfully.',
+        jsonError: 'JSON error: '
     },
     tr: {
         dayFirst: true,
@@ -89,7 +91,9 @@ const I18N = {
         confirmDel: function (t) { return '“' + t + '” silinsin mi?'; },
         invalidDate: 'Geçersiz tarih — YYYY-AA-GG kullanın',
         editingWeek: 'Düzenlenen',
-        maxReached: function (n) { return 'Günde en fazla ' + n + ' kayıt eklenebilir.'; }
+        maxReached: function (n) { return 'Günde en fazla ' + n + ' kayıt eklenebilir.'; },
+        jsonReloaded: 'Kayıtlar başarıyla yüklendi.',
+        jsonError: 'JSON hatası: '
     }
 };
 
@@ -186,24 +190,89 @@ function longDate(d, lang) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Model: entries per date                                             */
+/* Model: entries per date & weekly recurring                         */
 /* ------------------------------------------------------------------ */
-/*
- * data = {
- *   version: 3,
- *   ui: { weekOffset, selected },          // selected: ISO date of the day that the ＋ button adds to (or null)
- *   days: { "<YYYY-MM-DD>": [ entry, ... ] }   // the array order is the display order
- * }
- * entry = { id, title, notes, color ('' = default / '#rrggbb'), important, todo, done }
- */
+
+const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+const WEEKDAY_MAP = {
+    monday: 0, mon: 0, pazartesi: 0, pzt: 0, '0': 0, 0: 0,
+    tuesday: 1, tue: 1, 'salı': 1, sali: 1, sal: 1, '1': 1, 1: 1,
+    wednesday: 2, wed: 2, 'çarşamba': 2, carsamba: 2, car: 2, '2': 2, 2: 2,
+    thursday: 3, thu: 3, 'perşembe': 3, persembe: 3, per: 3, '3': 3, 3: 3,
+    friday: 4, fri: 4, cuma: 4, cum: 4, '4': 4, 4: 4,
+    saturday: 5, sat: 5, cumartesi: 5, cmt: 5, '5': 5, 5: 5,
+    sunday: 6, sun: 6, pazar: 6, paz: 6, '6': 6, 6: 6
+};
+
+const DEFAULT_OPTIONS = {
+    colors: ['blue', 'red', 'yellow', 'purple', 'teal', 'gray', 'pink', 'green', 'orange', 'navy'],
+    help: 'Weekly entries repeat on that weekday every week. Dates entries (YYYY-MM-DD) appear only on that specific date. Use color name or #hex.'
+};
+
+const DEFAULT_EXAMPLE = {
+    title: 'Example task (this sample is never displayed on the desklet)',
+    notes: 'Optional notes or details',
+    color: 'blue',
+    important: true,
+    todo: true,
+    done: false
+};
+
 const Model = {
     defaults: function () {
-        return { version: 3, ui: { weekOffset: 0, selected: null, editWeek: null }, weekly: [[], [], [], [], [], [], []], days: {} };
+        return {
+            version: 3,
+            options: DEFAULT_OPTIONS,
+            _example: DEFAULT_EXAMPLE,
+            ui: { weekOffset: 0, selected: null },
+            weekly: [[], [], [], [], [], [], []],
+            days: {}
+        };
     },
     emptyWeek: function () { return [[], [], [], [], [], [], []]; },
 
     toBool: function (v) { return v === true || v === 'true' || v === 1; },
     str: function (v) { return v === undefined || v === null ? '' : String(v); },
+
+    stripInternal: function (e) {
+        if (!e || typeof e !== 'object') return null;
+        const res = {};
+        if (e.id) res.id = e.id;
+        res.title = e.title || '';
+        if (e.notes) res.notes = e.notes;
+        if (e.color) res.color = e.color;
+        if (e.important) res.important = true;
+        if (e.todo) res.todo = true;
+        if (e.done) res.done = true;
+        return res;
+    },
+
+    toJSON: function (d) {
+        const weeklyObj = {};
+        WEEKDAYS.forEach(function (name, i) {
+            weeklyObj[name] = (d.weekly && Array.isArray(d.weekly[i]))
+                ? d.weekly[i].map(Model.stripInternal).filter(Boolean)
+                : [];
+        });
+
+        const datesObj = {};
+        if (d.days && typeof d.days === 'object') {
+            const sorted = Object.keys(d.days).sort();
+            sorted.forEach(function (dt) {
+                if (Array.isArray(d.days[dt]) && d.days[dt].length > 0) {
+                    datesObj[dt] = d.days[dt].map(Model.stripInternal).filter(Boolean);
+                }
+            });
+        }
+
+        return {
+            options: d.options || DEFAULT_OPTIONS,
+            _example: d._example || DEFAULT_EXAMPLE,
+            weekly: weeklyObj,
+            dates: datesObj
+        };
+    },
 
     cleanEntry: function (it) {
         if (!it || typeof it !== 'object') return null;
@@ -287,33 +356,55 @@ const Model = {
     /* Defensive normalization against corrupt or missing data. */
     normalize: function (raw) {
         if (!raw || typeof raw !== 'object') return Model.defaults();
-        let d;
-        if (raw.version === 3) {
-            d = Model.defaults();
-            if (raw.days && typeof raw.days === 'object') {
-                Object.keys(raw.days).forEach(function (k) {
-                    if (!parseIso(k) || !Array.isArray(raw.days[k])) return;
-                    const list = raw.days[k].map(Model.cleanEntry).filter(Boolean);
-                    if (list.length) d.days[k] = list;
-                });
-            }
-        } else {
+        let d = Model.defaults();
+
+        if (raw.options && typeof raw.options === 'object') {
+            d.options = raw.options;
+        }
+        if (raw._example && typeof raw._example === 'object') {
+            d._example = raw._example;
+        } else if (raw.example && typeof raw.example === 'object') {
+            d._example = raw.example;
+        }
+
+        const datesSource = (raw.dates && typeof raw.dates === 'object') ? raw.dates
+            : ((raw.days && typeof raw.days === 'object') ? raw.days : null);
+
+        if (datesSource) {
+            Object.keys(datesSource).forEach(function (k) {
+                if (!parseIso(k) || !Array.isArray(datesSource[k])) return;
+                const list = datesSource[k].map(Model.cleanEntry).filter(Boolean);
+                if (list.length) d.days[k] = list;
+            });
+        } else if ((raw.version && raw.version !== 3) || Array.isArray(raw.items) || raw.weeks) {
             d = Model.migrateOld(raw);
         }
+
+        if (raw.weekly && typeof raw.weekly === 'object') {
+            if (Array.isArray(raw.weekly)) {
+                for (let i = 0; i < 7; i++) {
+                    if (Array.isArray(raw.weekly[i])) {
+                        d.weekly[i] = raw.weekly[i].map(Model.cleanEntry).filter(Boolean);
+                    }
+                }
+            } else {
+                Object.keys(raw.weekly).forEach(function (k) {
+                    const lk = String(k).trim().toLowerCase();
+                    if (WEEKDAY_MAP[lk] !== undefined && Array.isArray(raw.weekly[k])) {
+                        const idx = WEEKDAY_MAP[lk];
+                        const list = raw.weekly[k].map(Model.cleanEntry).filter(Boolean);
+                        d.weekly[idx] = (d.weekly[idx] || []).concat(list);
+                    }
+                });
+            }
+        }
+
         const ui = raw.ui && typeof raw.ui === 'object' ? raw.ui : {};
         if (typeof ui.weekOffset === 'number' && isFinite(ui.weekOffset)) {
             d.ui.weekOffset = Math.max(-5000, Math.min(5000, Math.round(ui.weekOffset)));
         }
-        if (raw.version === 3 && parseIso(ui.selected)) d.ui.selected = ui.selected;
-        if (raw.version === 3 && parseIso(ui.editWeek) && wd(parseIso(ui.editWeek)) === 0) d.ui.editWeek = ui.editWeek;
-        /* Restore weekly repeat lists. */
-        if (raw.version === 3 && Array.isArray(raw.weekly)) {
-            for (let i = 0; i < 7; i++) {
-                if (Array.isArray(raw.weekly[i])) {
-                    d.weekly[i] = raw.weekly[i].map(Model.cleanEntry).filter(Boolean);
-                }
-            }
-        }
+        if (parseIso(ui.selected)) d.ui.selected = ui.selected;
+        if (parseIso(ui.editWeek) && wd(parseIso(ui.editWeek)) === 0) d.ui.editWeek = ui.editWeek;
         return d;
     },
 
@@ -571,6 +662,8 @@ PlannerDesklet.prototype = {
     _init: function (metadata, desklet_id) {
         Desklet.Desklet.prototype._init.call(this, metadata, desklet_id);
         this.instanceId = desklet_id;
+        this.instance_id = desklet_id;
+        this._uuid = metadata.uuid;
         this._saveTimer = null;
         this._cfgIdle = null;
         this._dayTimer = null;
@@ -583,6 +676,8 @@ PlannerDesklet.prototype = {
         this._rsTimer = null;
         this._rsGrab = false;
         this._suppressUntil = 0;
+        this._lastAppliedJson = '';
+        this._fileMonitor = null;
         this._renderIdle = null;
         try {
             this._setup(metadata, desklet_id);
@@ -621,15 +716,25 @@ PlannerDesklet.prototype = {
 
     /* ---------------- storage ---------------- */
 
-    _dataPath: function () { return GLib.build_filenamev([DATA_DIR, this.instanceId + '.json']); },
+    _dataPath: function () {
+        return GLib.build_filenamev([DATA_DIR, 'entries.json']);
+    },
+
+    _legacyDataPath: function () {
+        return GLib.build_filenamev([DATA_DIR, this.instanceId + '.json']);
+    },
 
     _loadData: function () {
         const path = this._dataPath();
+        const legacyPath = this._legacyDataPath();
         const tryRead = function (p) {
             if (!GLib.file_test(p, GLib.FileTest.EXISTS)) return undefined;
             try { return JSON.parse(Cinnamon.get_file_contents_utf8_sync(p)); } catch (e) { return null; }
         };
         let raw = tryRead(path);
+        if (raw === undefined && GLib.file_test(legacyPath, GLib.FileTest.EXISTS)) {
+            raw = tryRead(legacyPath);
+        }
         if (raw === null) { // corrupt file: move it aside, try the backup
             try {
                 Gio.File.new_for_path(path).move(Gio.File.new_for_path(path + '.corrupt-' + Date.now()),
@@ -637,14 +742,18 @@ PlannerDesklet.prototype = {
             } catch (e) { global.logError('[weekly-planner] could not move corrupt file: ' + e); }
             raw = tryRead(path + '~');
         }
-        if (raw && raw.version !== 3) { // older format: keep a copy of the original, then convert
+        if (raw && raw.version && raw.version !== 3) { // older format: keep a copy of the original, then convert
             try {
                 Gio.File.new_for_path(path).copy(Gio.File.new_for_path(path + '.pre-v3'),
                     Gio.FileCopyFlags.OVERWRITE, null, null);
             } catch (e) { global.logError('[weekly-planner] could not back up the old data file: ' + e); }
         }
         this.data = Model.normalize(raw || null);
-        if (raw && raw.version !== 3) this._saveNow();
+        const jsonStr = JSON.stringify(Model.toJSON(this.data), null, 2);
+        this._lastAppliedJson = jsonStr;
+        this._syncSettingsJson(jsonStr);
+        this._saveNow();
+        this._setupFileMonitor();
     },
 
     _scheduleSave: function () {
@@ -659,11 +768,66 @@ PlannerDesklet.prototype = {
     _saveNow: function () {
         try {
             GLib.mkdir_with_parents(DATA_DIR, 493); // 0755
+            const jsonStr = JSON.stringify(Model.toJSON(this.data), null, 2);
+            this._lastAppliedJson = jsonStr;
+
             const f = Gio.File.new_for_path(this._dataPath());
             // replace_contents: temp file + rename (atomic); make_backup=true -> "<file>~" backup
-            f.replace_contents(JSON.stringify(this.data), null, true, Gio.FileCreateFlags.NONE, null);
+            f.replace_contents(jsonStr, null, true, Gio.FileCreateFlags.NONE, null);
+
+            // Also keep legacy <instanceId>.json in sync
+            try {
+                const fLegacy = Gio.File.new_for_path(this._legacyDataPath());
+                fLegacy.replace_contents(jsonStr, null, false, Gio.FileCreateFlags.NONE, null);
+            } catch (le) { /* ignore */ }
+
+            this._syncSettingsJson(jsonStr);
+            try { this._pushLists(); } catch (pe) { /* ignore if not yet set up */ }
         } catch (e) {
             global.logError('[weekly-planner] save error: ' + e);
+        }
+    },
+
+    _syncSettingsJson: function (jsonStr) {
+        try {
+            if (this._getValue('entriesJson') !== jsonStr) {
+                this._setValue('entriesJson', jsonStr);
+            }
+        } catch (e) { /* ignore */ }
+    },
+
+    _setupFileMonitor: function () {
+        if (this._fileMonitor) return;
+        try {
+            const f = Gio.File.new_for_path(this._dataPath());
+            this._fileMonitor = f.monitor_file(Gio.FileMonitorFlags.NONE, null);
+            this._fileMonitor.connect('changed', function (mon, file, other, eventType) {
+                if (eventType === Gio.FileMonitorEvent.CHANGES_DONE_HINT ||
+                    eventType === Gio.FileMonitorEvent.CREATED) {
+                    this._onDiskFileChanged();
+                }
+            }.bind(this));
+        } catch (e) {
+            global.logError('[weekly-planner] file monitor setup error: ' + e);
+        }
+    },
+
+    _onDiskFileChanged: function () {
+        try {
+            const path = this._dataPath();
+            if (!GLib.file_test(path, GLib.FileTest.EXISTS)) return;
+            const diskText = Cinnamon.get_file_contents_utf8_sync(path);
+            if (!diskText || diskText === this._lastAppliedJson) return;
+            const parsed = JSON.parse(diskText);
+            if (parsed && typeof parsed === 'object') {
+                this.data = Model.normalize(parsed);
+                this._lastAppliedJson = diskText;
+                this._syncSettingsJson(diskText);
+                try { this._pushLists(); } catch (pe) { /* ignore */ }
+                this._render();
+            }
+        } catch (e) {
+            // Incomplete file write, wait for next event
         }
     },
 
@@ -681,7 +845,7 @@ PlannerDesklet.prototype = {
         }.bind(this));
     },
 
-    /* ---------------- entry lists (Configure → Entries) ---------------- */
+    /* ---------------- entry lists and JSON (Configure → Entries) ---------------- */
 
     _getValue: function (key) {
         try { return this.settings.getValue(key); } catch (e) { return undefined; }
@@ -754,7 +918,7 @@ PlannerDesklet.prototype = {
         this._changed();
     },
 
-    /* Callbacks invoked by buttons in Configure → Entries. */
+    /* Callbacks invoked by navigation buttons in Configure → Entries. */
     onWeekPrev: function () { this._setEditWeek(addDays(this._editMonday(), -7)); },
     onWeekNext: function () { this._setEditWeek(addDays(this._editMonday(), 7)); },
     onWeekToday: function () { this._setEditWeek(mondayOf(today())); },
@@ -762,6 +926,72 @@ PlannerDesklet.prototype = {
         const d = parseIso(String(this._getValue('weekDate') || '').trim());
         if (!d) { this._setValue('weekInfo', this._t('invalidDate')); return; }
         this._setEditWeek(mondayOf(d));
+    },
+
+    onReloadEntries: function () {
+        try {
+            const path = this._dataPath();
+            let text = this._getValue('entriesJson');
+            if (GLib.file_test(path, GLib.FileTest.EXISTS)) {
+                try {
+                    const diskText = Cinnamon.get_file_contents_utf8_sync(path);
+                    if (diskText && diskText !== this._lastAppliedJson) {
+                        text = diskText;
+                    }
+                } catch (fe) { /* ignore */ }
+            }
+            if (!text || !text.trim()) {
+                this.data = Model.defaults();
+            } else {
+                const parsed = JSON.parse(text);
+                this.data = Model.normalize(parsed);
+            }
+            this._saveNow();
+            try { this._pushLists(); } catch (pe) { /* ignore */ }
+            this._render();
+            try {
+                const Main = imports.ui.main;
+                if (Main && Main.notify) Main.notify('Weekly Planner', this._t('jsonReloaded'));
+            } catch (ne) { /* ignore */ }
+        } catch (err) {
+            global.logError('[weekly-planner] JSON reload error: ' + err);
+            try {
+                const Main = imports.ui.main;
+                if (Main && Main.notify) Main.notify('Weekly Planner', this._t('jsonError') + (err && err.message ? err.message : err));
+            } catch (ne) { /* ignore */ }
+        }
+    },
+
+    onOpenJsonFile: function () {
+        this._saveNow();
+        const path = this._dataPath();
+        try {
+            GLib.spawn_command_line_async('xdg-open ' + GLib.shell_quote(path));
+        } catch (e) {
+            global.logError('[weekly-planner] could not open JSON file: ' + e);
+        }
+    },
+
+    onFormatJson: function () {
+        try {
+            let text = this._getValue('entriesJson');
+            if (!text || !text.trim()) {
+                const path = this._dataPath();
+                if (GLib.file_test(path, GLib.FileTest.EXISTS)) {
+                    text = Cinnamon.get_file_contents_utf8_sync(path);
+                }
+            }
+            const parsed = (text && text.trim()) ? JSON.parse(text) : Model.defaults();
+            const formatted = JSON.stringify(Model.toJSON(Model.normalize(parsed)), null, 2);
+            this._setValue('entriesJson', formatted);
+            this._lastAppliedJson = formatted;
+        } catch (err) {
+            global.logError('[weekly-planner] Format JSON error: ' + err);
+            try {
+                const Main = imports.ui.main;
+                if (Main && Main.notify) Main.notify('Weekly Planner', this._t('jsonError') + (err && err.message ? err.message : err));
+            } catch (ne) { /* ignore */ }
+        }
     },
 
     /* ---------------- settings / theme ---------------- */
