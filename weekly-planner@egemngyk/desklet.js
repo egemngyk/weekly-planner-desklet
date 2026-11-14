@@ -782,7 +782,6 @@ PlannerDesklet.prototype = {
             } catch (le) { /* ignore */ }
 
             this._syncSettingsJson(jsonStr);
-            try { this._pushLists(); } catch (pe) { /* ignore if not yet set up */ }
         } catch (e) {
             global.logError('[weekly-planner] save error: ' + e);
         }
@@ -823,8 +822,11 @@ PlannerDesklet.prototype = {
                 this.data = Model.normalize(parsed);
                 this._lastAppliedJson = diskText;
                 this._syncSettingsJson(diskText);
-                try { this._pushLists(); } catch (pe) { /* ignore */ }
                 this._render();
+                Mainloop.timeout_add(150, function () {
+                    try { this._pushLists(); this._updateWeekFields(); } catch (pe) { /* ignore */ }
+                    return false;
+                }.bind(this));
             }
         } catch (e) {
             // Incomplete file write, wait for next event
@@ -834,6 +836,11 @@ PlannerDesklet.prototype = {
     _changed: function () {
         this._scheduleSave();
         this._queueRender();
+        // Also refresh list widgets in settings window after a short delay (after save completes)
+        Mainloop.timeout_add(450, function () {
+            try { this._pushLists(); } catch (pe) { /* ignore */ }
+            return false;
+        }.bind(this));
     },
 
     _queueRender: function () {
@@ -931,24 +938,41 @@ PlannerDesklet.prototype = {
     onReloadEntries: function () {
         try {
             const path = this._dataPath();
-            let text = this._getValue('entriesJson');
+            // Prefer disk file if it differs from what we last wrote
+            let text = null;
             if (GLib.file_test(path, GLib.FileTest.EXISTS)) {
-                try {
-                    const diskText = Cinnamon.get_file_contents_utf8_sync(path);
-                    if (diskText && diskText !== this._lastAppliedJson) {
-                        text = diskText;
-                    }
-                } catch (fe) { /* ignore */ }
+                try { text = Cinnamon.get_file_contents_utf8_sync(path); } catch (fe) { /* ignore */ }
             }
+            // Fall back to the settings textview
+            if (!text || !text.trim()) {
+                text = this._getValue('entriesJson');
+            }
+
+            // Remember current editWeek so the list widgets stay on the right week after reload
+            const prevEditWeek = this.data && this.data.ui && this.data.ui.editWeek;
+
             if (!text || !text.trim()) {
                 this.data = Model.defaults();
             } else {
                 const parsed = JSON.parse(text);
                 this.data = Model.normalize(parsed);
             }
+
+            // Restore editWeek if normalize reset it
+            if (prevEditWeek && (!this.data.ui.editWeek || this.data.ui.editWeek === iso(mondayOf(today())))) {
+                this.data.ui.editWeek = prevEditWeek;
+            }
+
             this._saveNow();
-            try { this._pushLists(); } catch (pe) { /* ignore */ }
             this._render();
+            // Push to list widgets after a short delay (settings write needs to settle)
+            Mainloop.timeout_add(100, function () {
+                try {
+                    this._pushLists();
+                    this._updateWeekFields();
+                } catch (pe) { /* ignore */ }
+                return false;
+            }.bind(this));
             try {
                 const Main = imports.ui.main;
                 if (Main && Main.notify) Main.notify('Weekly Planner', this._t('jsonReloaded'));
@@ -1682,7 +1706,17 @@ PlannerDesklet.prototype = {
             if (!title) { errL.set_text(self._t('errTitle')); return; }
             const fields = { title: title, notes: notesE.get_text().trim(), color: st.color, important: st.important, todo: st.todo };
             dlg.close();
-            if (e) Model.update(self.data, e, fields); else Model.add(self.data, dateStr, fields);
+            if (e) {
+                Model.update(self.data, e, fields);
+            } else {
+                Model.add(self.data, dateStr, fields);
+                // Point the entries list editor at the week containing this new entry,
+                // so it immediately appears in the weekItems list widgets.
+                try {
+                    const dt = parseIso(dateStr);
+                    if (dt) self.data.ui.editWeek = iso(mondayOf(dt));
+                } catch (te) { /* ignore */ }
+            }
             self.data.ui.selected = dateStr;
             self._changed();
         };
