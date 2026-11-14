@@ -32,8 +32,20 @@ assert.ok(a.id && a.id !== b.id && b.id !== c.id);
 /* ---- done / update / remove ---- */
 Model.toggleDone(b);
 assert.deepStrictEqual(day(d, '2026-11-02'), ['A', 'B✓', 'C']);
-Model.toggleDone(b);
+Model.toggleDone(d, b);
 assert.strictEqual(b.done, false);
+/* Test weekly repeat toggleDone */
+d.weekly[0] = [{ id: 'w_test', title: 'WeeklyTask', todo: true, done: false }];
+const wWeek = Model.week(d, wk('2026-11-02'));
+const wItem = wWeek.days[0].find(e => e.id === 'w_test');
+assert.ok(wItem);
+Model.toggleDone(d, wItem);
+assert.strictEqual(wItem.done, true);
+assert.strictEqual(d.weekly[0][0].done, true);
+Model.toggleDone(d, wItem);
+assert.strictEqual(wItem.done, false);
+assert.strictEqual(d.weekly[0][0].done, false);
+d.weekly[0] = [];
 Model.update(d, c, f('C2', { color: '#4f9dde', important: true }));
 assert.strictEqual(c.title, 'C2'); assert.strictEqual(c.color, '#4f9dde'); assert.strictEqual(c.id, d.days['2026-11-02'][2].id);
 Model.update(d, c, f('', {}));                                                    // invalid update is ignored

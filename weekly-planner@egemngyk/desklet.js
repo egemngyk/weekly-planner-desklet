@@ -326,18 +326,33 @@ const Model = {
             const date = iso(addDays(start, i));
             dates.push(date);
             const dated = data.days[date] || [];
-            const rep = (weekly[i] || []).map(function (e) { return Object.assign({}, e, { _weekly: true }); });
+            const rep = (weekly[i] || []).map(function (e) {
+                return Object.assign({}, e, { _weekly: true, _source: e });
+            });
             days.push(rep.concat(dated));
         }
         return { dates: dates, days: days };
     },
 
     find: function (data, id) {
-        const dates = Object.keys(data.days);
-        for (let k = 0; k < dates.length; k++) {
-            const list = data.days[dates[k]];
-            for (let i = 0; i < list.length; i++) {
-                if (list[i].id === id) return { date: dates[k], index: i, entry: list[i] };
+        if (!data) return null;
+        if (data.days && typeof data.days === 'object') {
+            const dates = Object.keys(data.days);
+            for (let k = 0; k < dates.length; k++) {
+                const list = data.days[dates[k]];
+                if (!Array.isArray(list)) continue;
+                for (let i = 0; i < list.length; i++) {
+                    if (list[i] && list[i].id === id) return { date: dates[k], index: i, entry: list[i] };
+                }
+            }
+        }
+        if (Array.isArray(data.weekly)) {
+            for (let w = 0; w < data.weekly.length; w++) {
+                const list = data.weekly[w];
+                if (!Array.isArray(list)) continue;
+                for (let i = 0; i < list.length; i++) {
+                    if (list[i] && list[i].id === id) return { weekly: true, weekday: w, index: i, entry: list[i] };
+                }
             }
         }
         return null;
@@ -358,11 +373,26 @@ const Model = {
     remove: function (data, id) {
         const f = Model.find(data, id);
         if (!f) return;
-        data.days[f.date].splice(f.index, 1);
-        if (!data.days[f.date].length) delete data.days[f.date];
+        if (f.weekly) {
+            data.weekly[f.weekday].splice(f.index, 1);
+        } else {
+            data.days[f.date].splice(f.index, 1);
+            if (!data.days[f.date].length) delete data.days[f.date];
+        }
     },
 
-    toggleDone: function (e) { e.done = !e.done; },
+    toggleDone: function (a, b) {
+        const e = b || a;
+        const data = b ? a : null;
+        e.done = !e.done;
+        if (e._source && typeof e._source === 'object') {
+            e._source.done = e.done;
+        }
+        if (data && e.id) {
+            const f = Model.find(data, e.id);
+            if (f && f.entry) f.entry.done = e.done;
+        }
+    },
 
     /*
      * Moves an entry to `toDate` so that it ends up at position `toIndex` of that day's list
@@ -1157,7 +1187,8 @@ PlannerDesklet.prototype = {
         const color = e.color || t.accent;
         const ds = this.cfg_doneStyle;
         const todo = !!e.todo, done = todo && e.done;
-        const strike = done && (ds === 'strike' || ds === 'both');
+        const hasStrike = ds === 'strike' || ds === 'both';
+        const hasDim = ds === 'dim' || ds === 'both';
 
         const btn = new St.Button({
             style_class: 'wp-item' + (e.important ? ' wp-item-important' : ''),
@@ -1170,7 +1201,7 @@ PlannerDesklet.prototype = {
         const edge = e.important ? t.imp : color;
         btn.style = 'border-left-color:' + edge + '; background-color:' + rgba(color, e.important ? 0.30 : 0.16) + ';';
         if (this._drag && this._drag.id === e.id) btn.opacity = 110;
-        else if (done && (ds === 'dim' || ds === 'both')) btn.opacity = 120;
+        else if (done && hasDim) btn.opacity = 120;
 
         const row = new St.BoxLayout({ style_class: 'wp-item-row' });
 
@@ -1189,25 +1220,42 @@ PlannerDesklet.prototype = {
         }.bind(this));
         row.add_actor(grip);
 
+        let chk = null, chkIcon = null;
         if (todo && this.cfg_showCheckbox !== false) {
-            const chk = new St.Button({
-                label: done ? '☑' : '☐',
-                style_class: 'wp-chk',
+            const chkSz = Math.max(14, Math.round(15 * (t.k || 1)));
+            const iconSz = Math.max(9, Math.round(10 * (t.k || 1)));
+
+            chk = new St.Button({
+                style_class: 'wp-chk' + (done ? ' wp-chk-checked' : ''),
                 reactive: true,
                 can_focus: false,
                 y_align: Clutter.ActorAlign.CENTER
             });
-            chk.style = 'color:' + t.text + ';';
-            chk.connect('clicked', function () {
-                Model.toggleDone(e);
-                this._changed();
-            }.bind(this));
+            chk.set_size(chkSz, chkSz);
+
+            const checkColor = color || t.accent;
+            const iconFg = readable('#ffffff', checkColor) === '#ffffff' ? '#ffffff' : '#1c1e24';
+
+            chkIcon = new St.Icon({
+                icon_name: 'object-select-symbolic',
+                icon_type: St.IconType.SYMBOLIC,
+                icon_size: iconSz,
+                style_class: 'wp-chk-icon',
+                style: 'color:' + iconFg + ';'
+            });
+            chk.set_child(chkIcon);
+            if (!done) chkIcon.hide();
+
+            const uncheckStyle = 'border-color:' + rgba(t.text, 0.40) + '; background-color: rgba(255, 255, 255, 0.05);';
+            const checkStyle = 'background-color:' + checkColor + '; border-color:' + checkColor + ';';
+            chk.style = done ? checkStyle : uncheckStyle;
+
             row.add_actor(chk);
         }
 
         let titleClass = 'wp-title';
         if (e.important) titleClass += ' wp-bold';
-        if (strike) titleClass += ' wp-strike';
+        if (done && hasStrike) titleClass += ' wp-strike';
 
         const title = new St.Label({
             text: (e.important && this.cfg_showStar !== false ? '★ ' : '') + trunc(e.title, compact ? 60 : 120),
@@ -1218,6 +1266,34 @@ PlannerDesklet.prototype = {
         const ct = title.clutter_text;
         ct.set_line_wrap(false);
         ct.set_ellipsize(Pango.EllipsizeMode.END);
+
+        if (chk) {
+            const checkColor = color || t.accent;
+            const uncheckStyle = 'border-color:' + rgba(t.text, 0.40) + '; background-color: rgba(255, 255, 255, 0.05);';
+            const checkStyle = 'background-color:' + checkColor + '; border-color:' + checkColor + ';';
+
+            const updateVisual = function (isDone) {
+                if (isDone) {
+                    chk.add_style_class_name('wp-chk-checked');
+                    chk.style = checkStyle;
+                    chkIcon.show();
+                    if (hasStrike) title.add_style_class_name('wp-strike');
+                    if (hasDim) btn.opacity = 120;
+                } else {
+                    chk.remove_style_class_name('wp-chk-checked');
+                    chk.style = uncheckStyle;
+                    chkIcon.hide();
+                    if (hasStrike) title.remove_style_class_name('wp-strike');
+                    if (hasDim) btn.opacity = 255;
+                }
+            };
+
+            chk.connect('clicked', function () {
+                Model.toggleDone(this.data, e);
+                updateVisual(e.done);
+                this._scheduleSave();
+            }.bind(this));
+        }
 
         if (!compact && e.notes && this.cfg_showNotes !== false) {
             const col = new St.BoxLayout({ vertical: true, x_expand: true });

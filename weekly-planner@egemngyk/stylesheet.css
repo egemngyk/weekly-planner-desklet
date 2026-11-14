@@ -49,7 +49,28 @@
 }
 
 .wp-chk {
-    padding: 0 2px;
+    border-radius: 4px;
+    border-width: 1.5px;
+    border-style: solid;
+    padding: 0;
+    margin: 0 4px 0 1px;
+}
+
+.wp-chk:hover {
+    border-color: rgba(255, 255, 255, 0.85);
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.wp-chk-checked {
+    /* Background and border set dynamically */
+}
+
+.wp-chk-checked:hover {
+    opacity: 0.90;
+}
+
+.wp-chk-icon {
+    color: #ffffff;
 }
 
 .wp-title {
