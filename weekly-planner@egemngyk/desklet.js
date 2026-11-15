@@ -1528,8 +1528,8 @@ PlannerDesklet.prototype = {
         if (!vis.length) { this._body.add_actor(new St.Label({ text: this._t('allHidden') })); return; }
         const rows = new St.BoxLayout({ vertical: true, style: 'spacing:4px;' });
         const todayStr = this._todayStr, target = this._targetIndex();
-        const nRows = +this.cfg_entryRows || 0;        // 0 = stacked, 1 = all side-by-side, 2..N = max rows
-        const fixedStack = Math.max(0, +this.cfg_entryFixedStack || 0); // >0 = fixed columns per row
+        const nRows = +this.cfg_entryRows || 0;             // 0 = stacked, 1 = all side-by-side, 2..N = max rows
+        const fixedStack = Math.max(0, +this.cfg_entryFixedStack || 0); // >0: first N entries side-by-side, rest follow nRows
         const sp = this.cfg_compact ? this._px(2) : this._px(4);
         for (let k = 0; k < vis.length; k++) {
             const i = vis[k];
@@ -1540,52 +1540,59 @@ PlannerDesklet.prototype = {
             const row = new St.BoxLayout({ style: 'spacing:8px;' });
             row.add_actor(this._dayHeader(i, date, date === todayStr, true));
             const entries = week.days[i] || [];
-            if (fixedStack > 0) {
-                /* Fixed-stack mode: each row holds exactly `fixedStack` entries side-by-side.
-                 * Entry N (0-based) goes to row floor(N / fixedStack). */
-                const grid = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing:' + sp + 'px;' });
-                let rowBox = null;
-                entries.forEach(function (e, idx) {
-                    if (idx % fixedStack === 0) {
-                        rowBox = new St.BoxLayout({ x_expand: true, style: 'spacing:' + sp + 'px;' });
-                        grid.add_actor(rowBox);
-                    }
-                    const item = this._makeItem(e, date, rec);
+            const grid = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing:' + sp + 'px;' });
+
+            /* ---- fixed stack header row ---- */
+            const startIdx = (fixedStack > 0 && entries.length > 0) ? Math.min(fixedStack, entries.length) : 0;
+            if (fixedStack > 0 && startIdx > 0) {
+                const stackRow = new St.BoxLayout({ x_expand: true, style: 'spacing:' + sp + 'px;' });
+                for (let s = 0; s < startIdx; s++) {
+                    const item = this._makeItem(entries[s], date, rec);
                     item.x_expand = true;
-                    rowBox.add_actor(item);
-                }, this);
-                row.add_actor(grid);
-            } else if (nRows === 0) {
-                /* Stacked vertically: each entry on its own line */
-                const list = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing:' + sp + 'px;' });
-                entries.forEach(function (e) { list.add_actor(this._makeItem(e, date, rec)); }, this);
-                row.add_actor(list);
-            } else if (nRows === 1) {
-                /* Side-by-side in 1 single horizontal row */
-                const list = new St.BoxLayout({ x_expand: true, style: 'spacing:' + sp + 'px;' });
-                entries.forEach(function (e) {
-                    const item = this._makeItem(e, date, rec);
-                    item.x_expand = true;
-                    list.add_actor(item);
-                }, this);
-                row.add_actor(list);
-            } else {
-                /* Multi-row: wrap into at most nRows rows */
-                const grid = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing:' + sp + 'px;' });
-                const numCols = Math.max(1, Math.ceil(entries.length / nRows));
-                for (let r = 0; r < nRows; r++) {
-                    const slice = entries.slice(r * numCols, (r + 1) * numCols);
-                    if (!slice.length && r > 0) break;
-                    const rowBox = new St.BoxLayout({ x_expand: true, style: 'spacing:' + sp + 'px;' });
-                    slice.forEach(function (e) {
+                    stackRow.add_actor(item);
+                }
+                grid.add_actor(stackRow);
+            }
+
+            /* ---- remaining entries follow the nRows rule ---- */
+            const rest = entries.slice(startIdx);
+            if (rest.length > 0) {
+                if (nRows === 0) {
+                    /* Stacked: one entry per line */
+                    rest.forEach(function (e) {
+                        const rr = new St.BoxLayout({ x_expand: true, style: 'spacing:' + sp + 'px;' });
                         const item = this._makeItem(e, date, rec);
                         item.x_expand = true;
-                        rowBox.add_actor(item);
+                        rr.add_actor(item);
+                        grid.add_actor(rr);
                     }, this);
-                    grid.add_actor(rowBox);
+                } else if (nRows === 1) {
+                    /* All remaining side-by-side in a single row */
+                    const rr = new St.BoxLayout({ x_expand: true, style: 'spacing:' + sp + 'px;' });
+                    rest.forEach(function (e) {
+                        const item = this._makeItem(e, date, rec);
+                        item.x_expand = true;
+                        rr.add_actor(item);
+                    }, this);
+                    grid.add_actor(rr);
+                } else {
+                    /* Max nRows rows, distribute remaining entries evenly */
+                    const numCols = Math.max(1, Math.ceil(rest.length / nRows));
+                    for (let r = 0; r < nRows; r++) {
+                        const slice = rest.slice(r * numCols, (r + 1) * numCols);
+                        if (!slice.length && r > 0) break;
+                        const rr = new St.BoxLayout({ x_expand: true, style: 'spacing:' + sp + 'px;' });
+                        slice.forEach(function (e) {
+                            const item = this._makeItem(e, date, rec);
+                            item.x_expand = true;
+                            rr.add_actor(item);
+                        }, this);
+                        grid.add_actor(rr);
+                    }
                 }
-                row.add_actor(grid);
             }
+
+            row.add_actor(grid);
             btn.add_actor(row);
             rows.add_actor(btn);
         }
