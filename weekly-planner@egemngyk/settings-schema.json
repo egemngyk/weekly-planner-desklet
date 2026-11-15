@@ -192,6 +192,7 @@
             "keys": [
                 "entryCols",
                 "entryRows",
+                "entryFixedStack",
                 "maxEntriesPerDay"
             ]
         }
@@ -1249,6 +1250,16 @@
             "Max 3 rows": 3,
             "Max 4 rows": 4
         }
+    },
+    "entryFixedStack": {
+        "type": "spinbutton",
+        "default": 0,
+        "min": 0,
+        "max": 20,
+        "step": 1,
+        "description": "Fixed stack size per row (horizontal layout, 0 = off)",
+        "tooltip": "In horizontal layout: group entries into rows of exactly this many columns. E.g. 3 = first 3 side-by-side, next 3 on the row below, etc. Set to 0 to disable (use Entry rows setting instead).",
+        "dependency": "layoutMode=rows"
     },
     "maxEntriesPerDay": {
         "type": "spinbutton",

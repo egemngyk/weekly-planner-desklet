@@ -642,7 +642,7 @@ const CFG_KEYS = ['layoutMode', 'compact', 'highlightToday', 'doneStyle', 'width
     'opacity', 'borderWidth', 'borderRadius', 'dateFormat', 'headerStyle', 'uiScale', 'language',
     'showDay0', 'showDay1', 'showDay2', 'showDay3', 'showDay4', 'showDay5', 'showDay6',
     'showNotes', 'showCheckbox', 'showStar',
-    'entryCols', 'entryRows', 'maxEntriesPerDay', 'deskletTitle'];
+    'entryCols', 'entryRows', 'entryFixedStack', 'maxEntriesPerDay', 'deskletTitle'];
 
 /* Settings list widgets: [kind, weekday index, settings key].
  * 'weekly' = repeat every week (data.weekly[i]), 'week' = specific week being edited (data.days[date]). */
@@ -1528,7 +1528,8 @@ PlannerDesklet.prototype = {
         if (!vis.length) { this._body.add_actor(new St.Label({ text: this._t('allHidden') })); return; }
         const rows = new St.BoxLayout({ vertical: true, style: 'spacing:4px;' });
         const todayStr = this._todayStr, target = this._targetIndex();
-        const nRows = +this.cfg_entryRows || 0; // 0 = stacked (1 per line), 1 = all side-by-side, 2..4 = max rows
+        const nRows = +this.cfg_entryRows || 0;        // 0 = stacked, 1 = all side-by-side, 2..N = max rows
+        const fixedStack = Math.max(0, +this.cfg_entryFixedStack || 0); // >0 = fixed columns per row
         const sp = this.cfg_compact ? this._px(2) : this._px(4);
         for (let k = 0; k < vis.length; k++) {
             const i = vis[k];
@@ -1539,7 +1540,22 @@ PlannerDesklet.prototype = {
             const row = new St.BoxLayout({ style: 'spacing:8px;' });
             row.add_actor(this._dayHeader(i, date, date === todayStr, true));
             const entries = week.days[i] || [];
-            if (nRows === 0) {
+            if (fixedStack > 0) {
+                /* Fixed-stack mode: each row holds exactly `fixedStack` entries side-by-side.
+                 * Entry N (0-based) goes to row floor(N / fixedStack). */
+                const grid = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing:' + sp + 'px;' });
+                let rowBox = null;
+                entries.forEach(function (e, idx) {
+                    if (idx % fixedStack === 0) {
+                        rowBox = new St.BoxLayout({ x_expand: true, style: 'spacing:' + sp + 'px;' });
+                        grid.add_actor(rowBox);
+                    }
+                    const item = this._makeItem(e, date, rec);
+                    item.x_expand = true;
+                    rowBox.add_actor(item);
+                }, this);
+                row.add_actor(grid);
+            } else if (nRows === 0) {
                 /* Stacked vertically: each entry on its own line */
                 const list = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing:' + sp + 'px;' });
                 entries.forEach(function (e) { list.add_actor(this._makeItem(e, date, rec)); }, this);
